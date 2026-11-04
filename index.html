@@ -37,7 +37,7 @@
                 <h1 class="text-2xl font-bold text-white tracking-wide flex items-center gap-2">
                     <span>⚔️</span> Interactive Boss Raid Schedule
                 </h1>
-                <p class="text-xs md:text-sm text-slate-400 mt-1">Core members display in white; Gimp/Reserve members automatically display in red.</p>
+                <p class="text-xs md:text-sm text-slate-400 mt-1">Core members display in white; Gimp/Reserve members automatically display in red. Live GitHub Sync active.</p>
             </div>
             
             <div class="flex flex-wrap items-center gap-2 md:gap-3 w-full lg:w-auto">
@@ -169,12 +169,70 @@
             { boss: "Bellona", timing: "", timingType: "", core1: "Shaka Kanna", core2: "Madisi", core3: "", gimp1: "R > +1", gimp2: "", gimp3: "" }
         ];
 
-        let scheduleData = loadData();
+        const GITHUB_USER = "silverstone-sc";
+        const GITHUB_REPO = "shaka-schedule";
+        const GITHUB_TOKEN = "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";
+        const FILE_PATH = "schedule.json";
+
+        async function loadDataFromGitHub() {
+            try {
+                const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${FILE_PATH}`;
+                const res = await fetch(url, {
+                    headers: { "Authorization": `token ${GITHUB_TOKEN}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    const decoded = JSON.parse(atob(data.content));
+                    return decoded;
+                }
+            } catch (err) {
+                console.error("Failed to load from GitHub, falling back to default.", err);
+            }
+            return JSON.parse(JSON.stringify(defaultScheduleData));
+        }
+
+        async function saveDataToGitHub() {
+            try {
+                const url = `https://api.github.com/repos/${GITHUB_USER}/${GITHUB_REPO}/contents/${FILE_PATH}`;
+                const getRes = await fetch(url, {
+                    headers: { "Authorization": `token ${GITHUB_TOKEN}` }
+                });
+                const fileData = await getRes.json();
+                const sha = fileData.sha;
+
+                await fetch(url, {
+                    method: "PUT",
+                    headers: {
+                        "Authorization": `token ${GITHUB_TOKEN}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        message: "Update boss schedule via dashboard",
+                        content: btoa(unescape(encodeURIComponent(JSON.stringify(scheduleData, null, 2)))),
+                        sha: sha
+                    })
+                });
+            } catch (err) {
+                console.error("Failed to sync to GitHub:", err);
+            }
+        }
+
+        let scheduleData = JSON.parse(JSON.stringify(defaultScheduleData));
         let currentView = 'boss';
+
+        async function initApp() {
+            const remoteData = await loadDataFromGitHub();
+            if (remoteData && Array.isArray(remoteData)) {
+                scheduleData = remoteData;
+            }
+            updateFilterDropdowns();
+            applyFilters();
+        }
 
         function saveData() {
             localStorage.setItem('bossScheduleData_v6', JSON.stringify(scheduleData));
             updateFilterDropdowns();
+            saveDataToGitHub();
         }
 
         function loadData() {
@@ -313,7 +371,6 @@
                 const names = [row.core1, row.core2, row.core3, row.gimp1, row.gimp2, row.gimp3].map(n => (n || '').trim());
                 const rowTiming = row.timing ? row.timing.trim() : "Default";
 
-                // Filtering Logic
                 const matchesPlayer = playerFilter === "ALL" || names.includes(playerFilter);
                 const matchesBoss = bossFilter === "ALL" || row.boss === bossFilter;
                 const matchesDay = dayFilter === "ALL" || rowTiming === dayFilter;
@@ -327,10 +384,8 @@
                 const tr = document.createElement('tr');
                 tr.className = "hover:bg-slate-750/50 transition-colors";
 
-                // Boss Cell (Accented Column)
                 const bossTd = `<td class="py-2.5 px-4 font-bold text-slate-100 border-r border-slate-700/70 col-boss-accent editable-cell" onclick="editBoss(${rowIndex})">${row.boss || '<span class="text-slate-500 italic">Click to edit</span>'}</td>`;
 
-                // Timing Cell (Accented Column)
                 let timingBadge = `<span class="text-slate-500 font-mono text-xs italic">Default</span>`;
                 if (row.timing) {
                     const badgeStyle = getTimingBadgeStyle(row.timing, row.timingType);
@@ -338,7 +393,6 @@
                 }
                 const timingTd = `<td class="py-2.5 px-4 border-r border-slate-700/70 col-timing-accent editable-cell" onclick="editTiming(${rowIndex})">${timingBadge}</td>`;
 
-                // Cell Formatter with Automatic Colors (Core = White, Gimp = Red)
                 const formatCell = (key, name, colType = 'core') => {
                     let cellContent = `<span class="text-slate-600 italic text-xs">+ Add</span>`;
                     const colClass = colType === 'core' ? 'col-core-accent' : 'col-gimp-accent';
@@ -563,9 +617,7 @@
             }
         }
 
-        // Initial setup
-        updateFilterDropdowns();
-        applyFilters();
+        initApp();
     </script>
 </body>
 </html>
